@@ -162,6 +162,42 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 #modal-cancel{background:var(--surface2);color:var(--text2);}
 #modal-ok{background:var(--accent);color:#0f1117;}
 
+/* GPS pin pulse animation */
+@keyframes gps-pulse{
+  0%{transform:scale(1);opacity:0.8;}
+  70%{transform:scale(2.8);opacity:0;}
+  100%{transform:scale(1);opacity:0;}
+}
+@keyframes gps-pulse2{
+  0%{transform:scale(1);opacity:0.5;}
+  70%{transform:scale(2.0);opacity:0;}
+  100%{transform:scale(1);opacity:0;}
+}
+.gps-pin-wrap{position:relative;width:20px;height:20px;}
+.gps-ring{
+  position:absolute;inset:0;border-radius:50%;
+  background:rgba(0,229,160,0.35);
+  animation:gps-pulse 2s ease-out infinite;
+}
+.gps-ring2{
+  position:absolute;inset:0;border-radius:50%;
+  background:rgba(0,229,160,0.2);
+  animation:gps-pulse2 2s ease-out infinite 0.5s;
+}
+.gps-dot{
+  position:absolute;top:50%;left:50%;
+  width:14px;height:14px;
+  transform:translate(-50%,-50%);
+  border-radius:50%;background:#00e5a0;
+  border:2.5px solid #0f1117;
+  box-shadow:0 0 0 2px rgba(0,229,160,0.5);
+}
+/* accuracy circle */
+.leaflet-interactive.gps-accuracy{stroke:#00e5a0;stroke-width:1;fill:rgba(0,229,160,0.08);}
+
+/* FAB active state */
+#fab-locate.tracking{background:rgba(0,229,160,0.2);color:#00e5a0;}
+
 /* Leaflet tweaks */
 .leaflet-control-zoom{display:none;}
 .leaflet-control-attribution{font-size:9px;opacity:0.5;}
@@ -188,7 +224,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   <div id="map-wrap">
     <div id="map"></div>
     <div id="fab-area">
-      <button class="fab" id="fab-locate" onclick="locateMe()" title="現在地">📍</button>
+      <button class="fab" id="fab-locate" onclick="toggleTracking()" title="現在地追跡">📍</button>
       <button class="fab" id="fab-undo" onclick="undoLast()" title="戻す">↩</button>
     </div>
   </div>
@@ -316,14 +352,71 @@ function toggleMode(){
 
 map.on('click',function(e){if(mode==='add')addPoint(e.latlng);});
 
-function locateMe(){
+// --- GPS tracking ---
+var gpsMarker=null,gpsAccCircle=null,gpsWatchId=null,gpsTracking=false,gpsCentering=true;
+
+function makeGpsIcon(){
+  return L.divIcon({
+    className:'',
+    html:'<div class="gps-pin-wrap"><div class="gps-ring2"></div><div class="gps-ring"></div><div class="gps-dot"></div></div>',
+    iconSize:[20,20],iconAnchor:[10,10]
+  });
+}
+
+function toggleTracking(){
+  if(gpsTracking){stopTracking();}else{startTracking();}
+}
+
+function startTracking(){
   if(!navigator.geolocation){showToast('位置情報が使えません');return;}
   showToast('現在地を取得中…');
-  navigator.geolocation.getCurrentPosition(function(pos){
-    var ll=[pos.coords.latitude,pos.coords.longitude];
-    map.setView(ll,16);
-    showToast('現在地に移動しました');
-  },function(){showToast('位置情報の取得に失敗しました');});
+  gpsCentering=true;
+  gpsWatchId=navigator.geolocation.watchPosition(
+    function(pos){
+      var ll=[pos.coords.latitude,pos.coords.longitude];
+      var acc=pos.coords.accuracy;
+      if(!gpsMarker){
+        gpsMarker=L.marker(ll,{icon:makeGpsIcon(),zIndexOffset:1000,interactive:false}).addTo(map);
+        gpsTracking=true;
+        document.getElementById('fab-locate').classList.add('tracking');
+        document.getElementById('fab-locate').textContent='🔵';
+        showToast('現在地を追跡中');
+      } else {
+        gpsMarker.setLatLng(ll);
+      }
+      if(gpsAccCircle){map.removeLayer(gpsAccCircle);}
+      gpsAccCircle=L.circle(ll,{radius:acc,className:'gps-accuracy',interactive:false}).addTo(map);
+      if(gpsCentering){map.setView(ll,16);gpsCentering=false;}
+    },
+    function(err){
+      var msg=err.code===1?'位置情報の許可が必要です':err.code===2?'位置情報を取得できません':'タイムアウトしました';
+      showToast(msg);stopTracking();
+    },
+    {enableHighAccuracy:true,maximumAge:3000,timeout:10000}
+  );
+  map.on('dragstart',onMapDrag);
+}
+
+function stopTracking(){
+  if(gpsWatchId!==null){navigator.geolocation.clearWatch(gpsWatchId);gpsWatchId=null;}
+  if(gpsMarker){map.removeLayer(gpsMarker);gpsMarker=null;}
+  if(gpsAccCircle){map.removeLayer(gpsAccCircle);gpsAccCircle=null;}
+  gpsTracking=false;gpsCentering=true;
+  var btn=document.getElementById('fab-locate');
+  btn.classList.remove('tracking');btn.textContent='📍';
+  map.off('dragstart',onMapDrag);
+  showToast('追跡を停止しました');
+}
+
+function onMapDrag(){gpsCentering=false;}
+
+function locateMe(){
+  if(gpsMarker){
+    gpsCentering=true;
+    map.setView(gpsMarker.getLatLng(),16);
+  } else {
+    startTracking();
+  }
 }
 
 // Toast
