@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>ランニングコース</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+:root{
+  --bg:#0f1117;
+  --surface:#1a1d27;
+  --surface2:#22263a;
+  --accent:#00e5a0;
+  --accent2:#00b8ff;
+  --text:#f0f2ff;
+  --text2:#8b90a8;
+  --danger:#ff5c6a;
+  --radius:14px;
+  --safe-bottom:env(safe-area-inset-bottom, 0px);
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Helvetica Neue',sans-serif;}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
+
+/* Header */
+#header{
+  background:var(--surface);
+  padding:12px 16px calc(12px + var(--safe-top,0px));
+  padding-top:max(12px, env(safe-area-inset-top, 12px));
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  z-index:1000;
+}
+#header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+#app-title{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--text);}
+#app-title span{color:var(--accent);}
+#stats-row{display:flex;gap:8px;}
+.stat-chip{
+  flex:1;background:var(--surface2);border-radius:10px;
+  padding:7px 10px;text-align:center;
+}
+.stat-chip .val{font-size:17px;font-weight:700;color:var(--accent);letter-spacing:-0.5px;}
+.stat-chip .lbl{font-size:10px;color:var(--text2);margin-top:1px;}
+
+/* Map */
+#map-wrap{flex:1;position:relative;overflow:hidden;}
+#map{width:100%;height:100%;}
+
+/* FAB area */
+#fab-area{
+  position:absolute;bottom:calc(80px + var(--safe-bottom));
+  right:16px;display:flex;flex-direction:column;gap:10px;z-index:900;
+}
+.fab{
+  width:50px;height:50px;border-radius:50%;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;box-shadow:0 4px 16px rgba(0,0,0,0.4);
+  transition:transform 0.15s,opacity 0.15s;
+  -webkit-user-select:none;user-select:none;
+}
+.fab:active{transform:scale(0.9);}
+#fab-locate{background:var(--surface);color:var(--accent2);}
+#fab-undo{background:var(--surface);color:var(--text2);}
+
+/* Bottom toolbar */
+#toolbar{
+  background:var(--surface);
+  border-top:1px solid rgba(255,255,255,0.06);
+  padding:10px 16px calc(10px + var(--safe-bottom));
+  padding-bottom:max(10px, calc(env(safe-area-inset-bottom,0px) + 10px));
+  z-index:1000;
+}
+#toolbar-inner{display:flex;gap:8px;align-items:center;}
+#btn-mode{
+  flex:1;height:48px;border-radius:var(--radius);border:none;cursor:pointer;
+  font-size:14px;font-weight:700;letter-spacing:0.3px;
+  transition:background 0.2s,transform 0.1s;
+}
+#btn-mode:active{transform:scale(0.97);}
+#btn-mode.adding{background:var(--accent);color:#0f1117;}
+#btn-mode.viewing{background:var(--surface2);color:var(--text2);}
+#btn-save,#btn-clear{
+  width:48px;height:48px;border-radius:var(--radius);border:none;cursor:pointer;
+  font-size:20px;background:var(--surface2);transition:transform 0.1s;
+}
+#btn-save:active,#btn-clear:active{transform:scale(0.9);}
+#btn-clear{color:var(--danger);}
+#btn-save{color:var(--accent2);}
+
+/* Course list panel */
+#panel{
+  position:absolute;bottom:0;left:0;right:0;z-index:2000;
+  background:var(--surface);
+  border-radius:20px 20px 0 0;
+  transform:translateY(100%);
+  transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
+  max-height:70vh;overflow-y:auto;
+  padding-bottom:max(16px, env(safe-area-inset-bottom,16px));
+}
+#panel.open{transform:translateY(0);}
+#panel-handle{width:36px;height:4px;background:var(--surface2);border-radius:2px;margin:12px auto 8px;}
+#panel-title{font-size:16px;font-weight:700;padding:0 16px 12px;border-bottom:1px solid rgba(255,255,255,0.06);}
+#course-list{padding:8px 16px;}
+.course-item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.05);
+  cursor:pointer;
+}
+.course-item:last-child{border-bottom:none;}
+.course-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+.course-info{flex:1;}
+.course-name{font-size:14px;font-weight:500;}
+.course-meta{font-size:12px;color:var(--text2);margin-top:2px;}
+.course-del{
+  width:32px;height:32px;border-radius:8px;border:none;
+  background:rgba(255,92,106,0.15);color:var(--danger);
+  font-size:16px;cursor:pointer;flex-shrink:0;
+}
+.course-del:active{background:rgba(255,92,106,0.3);}
+
+/* Overlay */
+#overlay{
+  display:none;position:absolute;inset:0;background:rgba(0,0,0,0.5);z-index:1900;
+}
+#overlay.show{display:block;}
+
+/* Toast */
+#toast{
+  position:absolute;top:16px;left:50%;transform:translateX(-50%) translateY(-80px);
+  background:rgba(30,33,50,0.95);color:var(--text);
+  padding:10px 18px;border-radius:24px;font-size:13px;
+  white-space:nowrap;z-index:3000;transition:transform 0.3s;
+  border:1px solid rgba(255,255,255,0.1);
+}
+#toast.show{transform:translateX(-50%) translateY(0);}
+
+/* Save modal */
+#modal-wrap{
+  display:none;position:absolute;inset:0;z-index:4000;
+  background:rgba(0,0,0,0.6);align-items:center;justify-content:center;
+}
+#modal-wrap.show{display:flex;}
+#modal{
+  background:var(--surface);border-radius:20px;padding:24px 20px;
+  width:calc(100% - 48px);max-width:340px;
+}
+#modal h3{font-size:17px;font-weight:700;margin-bottom:16px;}
+#modal input{
+  width:100%;height:48px;border-radius:var(--radius);
+  background:var(--surface2);border:1.5px solid rgba(255,255,255,0.08);
+  color:var(--text);font-size:15px;padding:0 14px;
+  outline:none;margin-bottom:14px;
+}
+#modal input:focus{border-color:var(--accent);}
+#modal-btns{display:flex;gap:8px;}
+#modal-btns button{
+  flex:1;height:48px;border-radius:var(--radius);border:none;
+  font-size:14px;font-weight:700;cursor:pointer;
+}
+#modal-cancel{background:var(--surface2);color:var(--text2);}
+#modal-ok{background:var(--accent);color:#0f1117;}
+
+/* Leaflet tweaks */
+.leaflet-control-zoom{display:none;}
+.leaflet-control-attribution{font-size:9px;opacity:0.5;}
+.leaflet-container{background:#1a1d27;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div id="header-top">
+      <div id="app-title">🏃 <span>ラン</span>コース</div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="openPanel()" style="background:var(--surface2);border:none;color:var(--text2);border-radius:10px;padding:6px 12px;font-size:12px;cursor:pointer;">コース一覧</button>
+      </div>
+    </div>
+    <div id="stats-row">
+      <div class="stat-chip"><div class="val" id="s-dist">0.00</div><div class="lbl">km</div></div>
+      <div class="stat-chip"><div class="val" id="s-pts">0</div><div class="lbl">ポイント</div></div>
+      <div class="stat-chip"><div class="val" id="s-time">--</div><div class="lbl">想定時間</div></div>
+      <div class="stat-chip"><div class="val" id="s-cal">--</div><div class="lbl">kcal目安</div></div>
+    </div>
+  </div>
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="fab-area">
+      <button class="fab" id="fab-locate" onclick="locateMe()" title="現在地">📍</button>
+      <button class="fab" id="fab-undo" onclick="undoLast()" title="戻す">↩</button>
+    </div>
+  </div>
+
+  <div id="toolbar">
+    <div id="toolbar-inner">
+      <button id="btn-mode" class="adding" onclick="toggleMode()">＋ タップで追加中</button>
+      <button id="btn-save" onclick="showSaveModal()" title="保存">💾</button>
+      <button id="btn-clear" onclick="clearCourse()" title="クリア">🗑</button>
+    </div>
+  </div>
+
+  <!-- Panel -->
+  <div id="overlay" onclick="closePanel()"></div>
+  <div id="panel">
+    <div id="panel-handle"></div>
+    <div id="panel-title">保存済みコース</div>
+    <div id="course-list"></div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Save modal -->
+  <div id="modal-wrap">
+    <div id="modal">
+      <h3>コースを保存</h3>
+      <input type="text" id="modal-input" placeholder="コース名を入力" maxlength="30"/>
+      <div id="modal-btns">
+        <button id="modal-cancel" onclick="hideModal()">キャンセル</button>
+        <button id="modal-ok" onclick="saveCourse()">保存する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var map = L.map('map',{zoomControl:false,attributionControl:true}).setView([36.1475,139.3886],14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OSM',maxZoom:19
+}).addTo(map);
+
+var points=[],markers=[],mode='add';
+var polyline=L.polyline([],{color:'#00e5a0',weight:4,opacity:0.9}).addTo(map);
+var startCircle=null;
+
+function haversine(a,b){
+  var R=6371,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;
+  var s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
+}
+
+function calcDist(){
+  var d=0;for(var i=1;i<points.length;i++)d+=haversine(points[i-1],points[i]);return d;
+}
+
+function updateStats(){
+  var d=calcDist();
+  var mins=Math.round(d*6);
+  var kcal=Math.round(d*60);
+  document.getElementById('s-dist').textContent=d.toFixed(2);
+  document.getElementById('s-pts').textContent=points.length;
+  document.getElementById('s-time').textContent=d>0?(Math.floor(mins/60)>0?Math.floor(mins/60)+'h':'')+((mins%60)+'m'):'--';
+  document.getElementById('s-cal').textContent=d>0?kcal:'--';
+  polyline.setLatLngs(points);
+  if(startCircle){map.removeLayer(startCircle);startCircle=null;}
+  if(points.length>0){
+    startCircle=L.circleMarker(points[0],{radius:8,color:'#00e5a0',fillColor:'#00e5a0',fillOpacity:1,weight:2}).addTo(map);
+  }
+}
+
+function makeIcon(idx){
+  var isStart=idx===0,isEnd=idx===points.length-1&&idx>0;
+  var color=isStart?'#00e5a0':isEnd?'#00b8ff':'#ffffff';
+  return L.divIcon({
+    className:'',
+    html:'<div style="width:12px;height:12px;border-radius:50%;background:'+color+';border:2px solid rgba(0,0,0,0.5);"></div>',
+    iconSize:[12,12],iconAnchor:[6,6]
+  });
+}
+
+function addPoint(latlng){
+  var idx=points.length;
+  points.push([latlng.lat,latlng.lng]);
+  var m=L.marker([latlng.lat,latlng.lng],{icon:makeIcon(idx),draggable:true});
+  m.on('drag',function(e){points[idx]=[e.target.getLatLng().lat,e.target.getLatLng().lng];updateStats();});
+  m.on('click',function(e){L.DomEvent.stop(e);removePoint(idx);});
+  m.addTo(map);
+  markers.push(m);
+  updateStats();
+  if(points.length===1)showToast('スタート地点を設定しました');
+}
+
+function removePoint(idx){
+  map.removeLayer(markers[idx]);
+  points.splice(idx,1);markers.splice(idx,1);
+  markers.forEach(function(m,i){m.setIcon(makeIcon(i));});
+  updateStats();
+}
+
+function undoLast(){
+  if(!points.length)return;
+  map.removeLayer(markers.pop());points.pop();updateStats();
+}
+
+function clearCourse(){
+  if(points.length===0)return;
+  if(!confirm('現在のコースを削除しますか？'))return;
+  points=[];markers.forEach(function(m){map.removeLayer(m);});markers=[];
+  if(startCircle){map.removeLayer(startCircle);startCircle=null;}
+  polyline.setLatLngs([]);
+  document.getElementById('s-dist').textContent='0.00';
+  document.getElementById('s-pts').textContent='0';
+  document.getElementById('s-time').textContent='--';
+  document.getElementById('s-cal').textContent='--';
+}
+
+function toggleMode(){
+  mode=mode==='add'?'view':'add';
+  var btn=document.getElementById('btn-mode');
+  if(mode==='add'){btn.textContent='＋ タップで追加中';btn.className='adding';}
+  else{btn.textContent='✋ 追加停止中';btn.className='viewing';}
+}
+
+map.on('click',function(e){if(mode==='add')addPoint(e.latlng);});
+
+function locateMe(){
+  if(!navigator.geolocation){showToast('位置情報が使えません');return;}
+  showToast('現在地を取得中…');
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var ll=[pos.coords.latitude,pos.coords.longitude];
+    map.setView(ll,16);
+    showToast('現在地に移動しました');
+  },function(){showToast('位置情報の取得に失敗しました');});
+}
+
+// Toast
+var toastTimer=null;
+function showToast(msg){
+  var t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  if(toastTimer)clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){t.classList.remove('show');},2500);
+}
+
+// Save/Load
+function showSaveModal(){
+  if(points.length<2){showToast('2点以上追加してください');return;}
+  document.getElementById('modal-input').value='コース'+(getSaved().length+1);
+  document.getElementById('modal-wrap').classList.add('show');
+  setTimeout(function(){document.getElementById('modal-input').focus();},300);
+}
+function hideModal(){document.getElementById('modal-wrap').classList.remove('show');}
+
+function saveCourse(){
+  var name=document.getElementById('modal-input').value.trim()||'マイコース';
+  var saved=getSaved();
+  saved.push({id:Date.now(),name:name,points:points.slice(),dist:calcDist()});
+  localStorage.setItem('running_courses',JSON.stringify(saved));
+  hideModal();showToast('「'+name+'」を保存しました');
+}
+
+function getSaved(){
+  try{return JSON.parse(localStorage.getItem('running_courses'))||[];}catch(e){return[];}
+}
+
+function loadCourse(item){
+  clearCourseForce();
+  points=item.points.slice();
+  markers=points.map(function(p,i){
+    var m=L.marker(p,{icon:makeIcon(i),draggable:true});
+    m.on('drag',function(e){points[i]=[e.target.getLatLng().lat,e.target.getLatLng().lng];updateStats();});
+    m.on('click',function(e){L.DomEvent.stop(e);removePoint(i);});
+    m.addTo(map);return m;
+  });
+  updateStats();
+  if(points.length>1)map.fitBounds(polyline.getBounds(),{padding:[40,40]});
+  closePanel();showToast('「'+item.name+'」を読み込みました');
+}
+
+function clearCourseForce(){
+  points=[];markers.forEach(function(m){map.removeLayer(m);});markers=[];
+  if(startCircle){map.removeLayer(startCircle);startCircle=null;}
+  polyline.setLatLngs([]);
+}
+
+function deleteCourse(id,e){
+  e.stopPropagation();
+  var saved=getSaved().filter(function(c){return c.id!==id;});
+  localStorage.setItem('running_courses',JSON.stringify(saved));
+  renderCourseList();showToast('削除しました');
+}
+
+function renderCourseList(){
+  var saved=getSaved();
+  var el=document.getElementById('course-list');
+  if(!saved.length){el.innerHTML='<p style="color:var(--text2);font-size:13px;padding:16px 0;">保存済みコースはありません</p>';return;}
+  el.innerHTML=saved.map(function(c){
+    return '<div class="course-item" onclick="loadCourse('+JSON.stringify(c).replace(/"/g,'&quot;')+')">'
+      +'<div class="course-dot"></div>'
+      +'<div class="course-info"><div class="course-name">'+c.name+'</div>'
+      +'<div class="course-meta">'+c.dist.toFixed(2)+'km &nbsp;·&nbsp; '+c.points.length+'ポイント</div></div>'
+      +'<button class="course-del" onclick="deleteCourse('+c.id+',event)">✕</button>'
+      +'</div>';
+  }).join('');
+}
+
+function openPanel(){renderCourseList();document.getElementById('panel').classList.add('open');document.getElementById('overlay').classList.add('show');}
+function closePanel(){document.getElementById('panel').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
+
+// Enter key on modal
+document.getElementById('modal-input').addEventListener('keydown',function(e){if(e.key==='Enter')saveCourse();});
+</script>
+</body>
+</html>
